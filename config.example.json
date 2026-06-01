@@ -1,0 +1,18 @@
+{
+  "_comment": "Optional file-based config. Copy to config.json. Environment variables (and .env) override anything set here. Only include keys you want to change.",
+  "trade_size_usdc": 100.0,
+  "buy_cap_usdc": 1000.0,
+  "momentum_threshold": 0.003,
+  "obi_threshold": 0.15,
+  "vwap_edge": 0.002,
+  "convergence": 0.001,
+  "momentum_window": 30,
+  "trades_limit": 100,
+  "exit_seconds": 15,
+  "no_entry_seconds": 20,
+  "poll_interval_s": 1.0,
+  "heartbeat_s": 30,
+  "archetype": "Custom",
+  "dry_run": true,
+  "log_level": "INFO"
+}

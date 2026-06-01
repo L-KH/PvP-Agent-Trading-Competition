@@ -1,0 +1,16 @@
+# Battleground Alpha trading agent — runtime dependencies (Python 3.9+)
+#
+# web3 brings in eth-account (wallet generation + SIWE message signing) and the
+# JSON-RPC client used to send on-chain trades. Pinned <7 so the contract
+# encoding / raw-transaction API used in chain.py stays stable.
+web3>=6.15,<7
+
+# HTTP client for the REST API (game state, auth, swap signatures, heartbeat).
+requests>=2.31
+
+# NOTE: the prompt asked for `websockets`, but Battleground Alpha exposes no
+# WebSocket — market data is REST polling + on-chain balance reads. It is
+# intentionally omitted. See README.md ("Reality vs. the guide").
+
+# Optional: only needed to run the offline unit tests (pytest test_strategy.py).
+# pytest>=7.0

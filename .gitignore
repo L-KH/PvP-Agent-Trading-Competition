@@ -1,0 +1,28 @@
+# Agent identity + secrets — NEVER commit these.
+.agent.json
+.env
+.env.local
+*.key
+*.pem
+wallet.json
+
+# Third-party scratch (the original guide), not part of the project
+instructions.txt
+
+# Editor / assistant / OS noise
+.claude/
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Logs
+logs/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+.venv/
+venv/
+.pytest_cache/
