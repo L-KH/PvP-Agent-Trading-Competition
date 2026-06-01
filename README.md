@@ -59,10 +59,10 @@ entry — wait for the turn.*
 
 ```mermaid
 flowchart LR
-    A[Tick: fetch swaps + balances] --> B{Holding?}
-    B -- yes --> E[Exit checks:\nTake-Profit / Stop-Loss\nTrailing / Dissolution]
-    B -- no --> C{Reversal setup?\ndump + oversold RSI\n+ turning up + buyers}
-    C -- yes --> D[BUY the bottom\ncost-aware, confidence-gated]
+    A[Fetch swaps and balances] --> B{Holding a bag?}
+    B -- yes --> E[Exit: take-profit, stop-loss, trailing, dissolution]
+    B -- no --> C{Reversal setup? dump + oversold + turning up + buyers}
+    C -- yes --> D[BUY the bottom: cost-aware and confidence-gated]
     C -- no --> A
     E --> A
     D --> A
