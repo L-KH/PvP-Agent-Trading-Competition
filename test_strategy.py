@@ -1,5 +1,9 @@
-"""Offline unit tests for the v3 strategy: signal math (incl. RSI + structure)
-and every decide() branch (reversal entry gates + exit management).
+"""Offline unit tests for both strategies + signal math.
+
+  * signal math (parse, VWAP, momentum, flow, volatility, RSI, structure)
+  * decide_reversal()  — buy confirmed bottoms, sell into the bounce
+  * decide_open_pump()  — buy the open, ride the pump
+  * decide()           — dispatches on cfg.strategy
 
 Run:  python test_strategy.py     (or: pytest test_strategy.py)
 No network or chain access required.
@@ -10,7 +14,7 @@ from config import Config
 from strategy import (
     Portfolio, Signals, Snapshot, build_signals, compute_flow_imbalance,
     compute_momentum, compute_rsi, compute_structure, compute_volatility,
-    compute_vwap, decide, _parse_trades,
+    compute_vwap, decide, decide_open_pump, decide_reversal, _parse_trades,
 )
 from utils import to_wei18
 
@@ -43,11 +47,11 @@ def _sig(price=100.0, vwap=100.0, rsi=50.0, drawdown=0.0, bounce=0.0,
                    bounce=bounce, short_momentum=short_momentum, n_trades=50)
 
 
-def _snap(sig, gr) -> Snapshot:
+def _snap(sig, gr):
     return Snapshot("0xtok", sig.price, sig, gr)
 
 
-def _port(usdc, token, cum=0.0, avg_entry=0.0, peak=0.0) -> Portfolio:
+def _port(usdc, token, cum=0.0, avg_entry=0.0, peak=0.0):
     return Portfolio(usdc, token, cum, avg_entry, peak)
 
 
@@ -86,117 +90,130 @@ def test_volatility():
 
 
 def test_rsi_direction():
-    assert compute_rsi(_series(list(range(100, 120))), 9) > 50   # rising
-    assert compute_rsi(_series(list(range(120, 100, -1))), 9) < 50  # falling
+    assert compute_rsi(_series(list(range(100, 120))), 9) > 50
+    assert compute_rsi(_series(list(range(120, 100, -1))), 9) < 50
 
 
 def test_structure_dump_and_bounce():
     lo, hi, dd, bnc = compute_structure(_series([100, 95, 90, 80, 82]), 14)
     assert lo == 80 and hi == 100
-    assert abs(dd - 0.20) < 1e-9            # (100-80)/100
-    assert abs(bnc - 0.025) < 1e-9          # (82-80)/80
+    assert abs(dd - 0.20) < 1e-9 and abs(bnc - 0.025) < 1e-9
 
 
-def test_build_signals_populates_v3_fields():
+def test_build_signals_populates_fields():
     sig = build_signals(SAMPLE_TRADES, 0.05, _cfg())
     assert sig.price == 0.05 and sig.vwap > 0
     assert 0 <= sig.rsi <= 100 and sig.drawdown >= 0 and sig.bounce >= 0
 
 
-# ── entry branches (flat): reversal gates ────────────────────────────────────
+# ── reversal strategy ────────────────────────────────────────────────────────
 def test_reversal_entry_fires():
-    cfg = _cfg()
     sig = _sig(rsi=30, drawdown=0.20, bounce=0.02, short_momentum=0.01, flow=0.30)
-    d = decide(_snap(sig, gr=120), _port(usdc=1000, token=0), cfg)
+    d = decide_reversal(_snap(sig, 120), _port(1000, 0), _cfg())
     assert d.action == "buy" and "REVERSAL" in d.reason
 
 
-def test_no_entry_without_dump():
-    cfg = _cfg()
-    sig = _sig(rsi=30, drawdown=0.02, bounce=0.02, short_momentum=0.01, flow=0.30)  # no dump
-    assert decide(_snap(sig, 120), _port(1000, 0), cfg).action == "hold"
+def test_reversal_no_entry_without_dump():
+    sig = _sig(rsi=30, drawdown=0.02, bounce=0.02, short_momentum=0.01, flow=0.30)
+    assert decide_reversal(_snap(sig, 120), _port(1000, 0), _cfg()).action == "hold"
 
 
-def test_no_entry_when_still_falling():
-    cfg = _cfg()
-    sig = _sig(rsi=30, drawdown=0.20, bounce=0.02, short_momentum=-0.05, flow=0.30)  # not turning up
-    assert decide(_snap(sig, 120), _port(1000, 0), cfg).action == "hold"
+def test_reversal_no_entry_when_still_falling():
+    sig = _sig(rsi=30, drawdown=0.20, bounce=0.02, short_momentum=-0.05, flow=0.30)
+    d = decide_reversal(_snap(sig, 120), _port(1000, 0), _cfg())
+    assert d.action == "hold" and "turn=-0.050(0)" in d.reason  # turning gate blocked it
 
 
-def test_no_entry_when_not_oversold():
-    cfg = _cfg()
-    sig = _sig(rsi=70, drawdown=0.20, bounce=0.02, short_momentum=0.01, flow=0.30)  # not oversold
-    assert decide(_snap(sig, 120), _port(1000, 0), cfg).action == "hold"
+def test_reversal_no_entry_when_not_oversold():
+    sig = _sig(rsi=70, drawdown=0.20, bounce=0.02, short_momentum=0.01, flow=0.30)
+    assert decide_reversal(_snap(sig, 120), _port(1000, 0), _cfg()).action == "hold"
 
 
-def test_no_entry_on_sell_flow():
-    cfg = _cfg()
-    sig = _sig(rsi=30, drawdown=0.20, bounce=0.02, short_momentum=0.01, flow=-0.5)  # heavy selling
-    assert decide(_snap(sig, 120), _port(1000, 0), cfg).action == "hold"
+def test_reversal_no_entry_on_sell_flow():
+    sig = _sig(rsi=30, drawdown=0.20, bounce=0.02, short_momentum=0.01, flow=-0.5)
+    assert decide_reversal(_snap(sig, 120), _port(1000, 0), _cfg()).action == "hold"
 
 
-def test_entry_blackout_near_end():
-    cfg = _cfg()
-    sig = _sig(rsi=30, drawdown=0.20, bounce=0.02, short_momentum=0.01, flow=0.30)
-    assert decide(_snap(sig, gr=8), _port(1000, 0), cfg).action == "hold"  # gr < no_entry(12)
-
-
-def test_buy_size_clamped_by_cap():
-    cfg = _cfg(buy_cap_usdc=1000, trade_size_usdc=100)
-    sig = _sig(rsi=30, drawdown=0.20, bounce=0.02, short_momentum=0.01, flow=0.30)
-    d = decide(_snap(sig, 120), _port(usdc=1000, token=0, cum=950), cfg)
-    assert d.action == "buy" and abs(d.amount_usdc - 50.0) < 1e-9
-
-
-# ── exit branches (holding) ─────────────────────────────────────────────────
-def test_take_profit():
-    cfg = _cfg()
-    d = decide(_snap(_sig(price=105.0), gr=120), _port(0, 50, avg_entry=100.0, peak=105.0), cfg)
+def test_reversal_take_profit():
+    d = decide_reversal(_snap(_sig(price=105.0), 120), _port(0, 50, avg_entry=100.0, peak=105.0), _cfg())
     assert d.action == "sell" and "TAKE-PROFIT" in d.reason
 
 
-def test_stop_loss():
-    cfg = _cfg()
-    d = decide(_snap(_sig(price=95.0), gr=120), _port(0, 50, avg_entry=100.0, peak=100.0), cfg)
+def test_reversal_stop_loss():
+    d = decide_reversal(_snap(_sig(price=95.0), 120), _port(0, 50, avg_entry=100.0, peak=100.0), _cfg())
     assert d.action == "sell" and "STOP-LOSS" in d.reason
 
 
-def test_trailing_stop():
-    cfg = _cfg()  # peak gain 3.5% (armed), pulled back 1.6% from peak, unrl +1.8% (< TP)
-    d = decide(_snap(_sig(price=101.8), gr=120), _port(0, 50, avg_entry=100.0, peak=103.5), cfg)
+def test_reversal_trailing_stop():
+    d = decide_reversal(_snap(_sig(price=101.8), 120), _port(0, 50, avg_entry=100.0, peak=103.5), _cfg())
     assert d.action == "sell" and "TRAILING-STOP" in d.reason
 
 
-def test_dissolution_exit():
-    cfg = _cfg()
-    d = decide(_snap(_sig(price=98.0), gr=10), _port(0, 50, avg_entry=100.0, peak=100.0), cfg)
+def test_reversal_dissolution_without_cost_basis():
+    # Regression: a bag with unknown cost basis must still flatten at dissolution.
+    d = decide_reversal(_snap(_sig(price=98.0), 10), _port(0, 50, avg_entry=0.0), _cfg())
     assert d.action == "sell" and "DISSOLUTION" in d.reason
 
 
-def test_dissolution_exit_without_cost_basis():
-    # Regression: a bag with unknown cost basis must still flatten at dissolution
-    # (previously it held to zero -> the FROSTVAULT 4-buys/3-sells loss).
-    cfg = _cfg()
-    d = decide(_snap(_sig(price=98.0), gr=10), _port(0, 50, avg_entry=0.0), cfg)
+# ── open_pump strategy ───────────────────────────────────────────────────────
+def test_open_buy_at_session_start():
+    d = decide_open_pump(_snap(_sig(price=1.0), 178), _port(usdc=100, token=0, cum=0), _cfg())
+    assert d.action == "buy" and "OPEN" in d.reason and abs(d.amount_usdc - 100) < 1e-9
+
+
+def test_open_no_rebuy_after_play():
+    d = decide_open_pump(_snap(_sig(price=1.0), 170), _port(usdc=100, token=0, cum=100), _cfg())
+    assert d.action == "hold" and "already" in d.reason
+
+
+def test_open_missed_window():
+    d = decide_open_pump(_snap(_sig(price=1.0), 100), _port(usdc=100, token=0, cum=0), _cfg())
+    assert d.action == "hold" and "missed open" in d.reason
+
+
+def test_open_pump_target():
+    d = decide_open_pump(_snap(_sig(price=3.0), 120), _port(0, 50, avg_entry=1.0, peak=3.0), _cfg())
+    assert d.action == "sell" and "PUMP-TARGET" in d.reason
+
+
+def test_open_stop_failed_pump():
+    d = decide_open_pump(_snap(_sig(price=0.87), 120), _port(0, 50, avg_entry=1.0, peak=1.0), _cfg())
+    assert d.action == "sell" and "OPEN-STOP" in d.reason
+
+
+def test_open_pump_trailing():
+    d = decide_open_pump(_snap(_sig(price=1.08), 120), _port(0, 50, avg_entry=1.0, peak=1.3), _cfg())
+    assert d.action == "sell" and "PUMP-TRAIL" in d.reason
+
+
+def test_open_dissolution():
+    d = decide_open_pump(_snap(_sig(price=0.5), 10), _port(0, 50, avg_entry=1.0, peak=1.0), _cfg())
     assert d.action == "sell" and "DISSOLUTION" in d.reason
 
 
-def test_hold_small_unrealized():
-    cfg = _cfg()
-    d = decide(_snap(_sig(price=101.5), gr=120), _port(0, 50, avg_entry=100.0, peak=101.5), cfg)
-    assert d.action == "hold" and "holding" in d.reason
+def test_open_riding_holds():
+    # gr=160 is still in the early window (> open_exit_by_gr), so it rides.
+    d = decide_open_pump(_snap(_sig(price=1.05), 160), _port(0, 50, avg_entry=1.0, peak=1.05), _cfg())
+    assert d.action == "hold" and "riding" in d.reason
 
 
-def test_awaiting_cost_basis():
-    cfg = _cfg()
-    d = decide(_snap(_sig(price=100.0), gr=120), _port(0, 50, avg_entry=0.0), cfg)
-    assert d.action == "hold" and "cost basis" in d.reason
+def test_open_early_exit_backstop():
+    # Past the early window with no target/stop/trail trigger -> bail before the bleed.
+    d = decide_open_pump(_snap(_sig(price=1.05), 119), _port(0, 50, avg_entry=1.0, peak=1.05), _cfg())
+    assert d.action == "sell" and "EARLY-EXIT" in d.reason
 
 
-def test_warmup_no_price():
-    cfg = _cfg()
-    sig = _sig(price=0.0, vwap=0.0)
-    assert decide(_snap(sig, 120), _port(1000, 0), cfg).action == "hold"
+# ── dispatcher ───────────────────────────────────────────────────────────────
+def test_default_strategy_is_open_pump():
+    assert Config().strategy == "open_pump"
+
+
+def test_dispatch_selects_strategy():
+    open_d = decide(_snap(_sig(price=1.0), 178), _port(100, 0, cum=0), _cfg(strategy="open_pump"))
+    assert "OPEN" in open_d.reason
+    rev_sig = _sig(rsi=30, drawdown=0.20, bounce=0.02, short_momentum=0.01, flow=0.30, price=90.0)
+    rev_d = decide(_snap(rev_sig, 120), _port(1000, 0), _cfg(strategy="reversal"))
+    assert "REVERSAL" in rev_d.reason
 
 
 def test_to_wei18_roundtrip():

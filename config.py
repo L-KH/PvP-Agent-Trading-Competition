@@ -71,11 +71,24 @@ class Config:
     min_entry_momentum: float = 0.0     # short momentum must be >= this (turning up)
     confidence_threshold: float = 0.35  # min composite score [0,1] to enter (lower = more trades)
 
-    # ── Exit: sell into strength + risk management ──
+    # ── Exit: sell into strength + risk management (reversal strategy) ──
     take_profit_pct: float = 0.05       # lock gains at +this unrealized ("sell mid")
     stop_loss_pct: float = 0.04         # cut losers at -this unrealized
     trail_activate_pct: float = 0.03    # arm trailing stop once peak gain >= this
     trailing_stop_pct: float = 0.015    # exit if price drops this far from the peak
+
+    # ── Strategy selector + "open_pump" (buy the open, ride the early pump) ──
+    # These launch tokens reliably pump ~3-5x in the first ~20s, then bleed down.
+    # "open_pump" buys big at the session open and rides that pump.
+    strategy: str = "open_pump"         # "open_pump" | "reversal"
+    open_buy_usdc: float = 1000.0       # open-buy size (clamped to budget/Safe => ~all-in)
+    open_entry_min_gr: int = 150        # only open-buy while gameRemaining >= this (early in live)
+    pump_target_mult: float = 3.0       # hard take-profit at entry x this
+    pump_trail_arm: float = 1.2         # arm the pump trailing-stop once price >= entry x this
+    open_trail_pct: float = 0.12        # sell if price drops this far from the peak (tight = exit fast)
+    open_stop_pct: float = 0.12         # cut if price falls this far below entry (failed pump)
+    open_exit_by_gr: int = 120          # backstop: exit the open play once gameRemaining <= this
+                                        # (the early pump is over by then; endgame is a dead bleed)
 
     # ── Sizing / risk ──
     trade_size_usdc: float = 100.0      # USDC per entry
@@ -231,6 +244,15 @@ def load_config(env_file: str = ".env", json_file: str = "config.json") -> Confi
     cfg.stop_loss_pct = _f("BID_STOP_LOSS_PCT", cfg.stop_loss_pct)
     cfg.trail_activate_pct = _f("BID_TRAIL_ACTIVATE_PCT", cfg.trail_activate_pct)
     cfg.trailing_stop_pct = _f("BID_TRAILING_STOP_PCT", cfg.trailing_stop_pct)
+
+    cfg.strategy = _s("BID_STRATEGY", cfg.strategy)
+    cfg.open_buy_usdc = _f("BID_OPEN_BUY_USDC", cfg.open_buy_usdc)
+    cfg.open_entry_min_gr = _i("BID_OPEN_ENTRY_MIN_GR", cfg.open_entry_min_gr)
+    cfg.pump_target_mult = _f("BID_PUMP_TARGET_MULT", cfg.pump_target_mult)
+    cfg.pump_trail_arm = _f("BID_PUMP_TRAIL_ARM", cfg.pump_trail_arm)
+    cfg.open_trail_pct = _f("BID_OPEN_TRAIL_PCT", cfg.open_trail_pct)
+    cfg.open_stop_pct = _f("BID_OPEN_STOP_PCT", cfg.open_stop_pct)
+    cfg.open_exit_by_gr = _i("BID_OPEN_EXIT_BY_GR", cfg.open_exit_by_gr)
 
     cfg.trade_size_usdc = _f("BID_TRADE_SIZE_USDC", cfg.trade_size_usdc)
     cfg.buy_cap_usdc = _f("BID_BUY_CAP_USDC", cfg.buy_cap_usdc)

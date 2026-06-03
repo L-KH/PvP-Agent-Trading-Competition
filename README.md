@@ -50,7 +50,14 @@ actually fights every battle.
 
 ---
 
-## 🧠 The strategy — "buy the bottom, not the knife"
+## 🎯 Two switchable strategies (`BID_STRATEGY`)
+
+Both ship in `strategy.py` — pick one in `.env`:
+
+- **`open_pump`** *(default)* — these launch tokens reliably rip **~3–5× in the first ~20 seconds**, then bleed into a dead endgame. So it **buys big at the open**, rides the pump, and exits fast: take-profit at a target multiple, a tight trailing stop to capture the peak, a quick stop if the pump fails, and a hard **early-exit backstop** so it never holds into the dead second half. One open play per battle.
+- **`reversal`** — buys confirmed **bottoms after a dump** (ICT liquidity-sweep + RSI-oversold + turn-up + buyers) and sells into the bounce, multiple entries per battle. Detailed below.
+
+## 🧠 The `reversal` strategy — "buy the bottom, not the knife"
 
 These launch tokens follow a brutal rhythm: **pump → dump hard → chop/recover.** The losers (and our
 own naive v1) bought *into* the dump and bled out. The winners buy the **bottom** after the dump

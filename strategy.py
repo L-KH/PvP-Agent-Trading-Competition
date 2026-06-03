@@ -212,7 +212,8 @@ def build_signals(trades: List[dict], current_price: Optional[float], cfg) -> Si
 
 
 # ── the decision function ─────────────────────────────────────────────────────
-def decide(snapshot: Snapshot, portfolio: Portfolio, cfg, logger=None) -> Decision:
+def decide_reversal(snapshot: Snapshot, portfolio: Portfolio, cfg, logger=None) -> Decision:
+    """Strategy 'reversal': buy confirmed bottoms after a dump, sell into the bounce."""
     s = snapshot.signals
     mark = snapshot.price if snapshot.price > 0 else s.price
     gr = snapshot.game_remaining
@@ -282,3 +283,72 @@ def decide(snapshot: Snapshot, portfolio: Portfolio, cfg, logger=None) -> Decisi
         f"no entry: dd={s.drawdown:.3f}({int(dumped)}) bnc={s.bounce:.3f}({int(bounced)}) "
         f"turn={s.short_momentum:.3f}({int(turning)}) rsi={s.rsi:.0f}({int(oversold)}) "
         f"flow={s.flow_imbalance:.2f}({int(flow_ok)}) score={score:.2f}"))
+
+
+def decide_open_pump(snapshot: Snapshot, portfolio: Portfolio, cfg, logger=None) -> Decision:
+    """Strategy 'open_pump': buy big at the session open and ride the early pump.
+
+    These launch tokens reliably pump then bleed, so we take one big position
+    right at the open and exit on whichever comes first:
+      * PUMP-TARGET  — price hit entry x pump_target_mult (the home run)
+      * PUMP-TRAIL   — pumped (peak >= entry x pump_trail_arm) then pulled back open_trail_pct
+      * OPEN-STOP    — price fell open_stop_pct below entry (the pump failed)
+      * DISSOLUTION  — round is ending
+    One open play per battle (no re-entry).
+    """
+    s = snapshot.signals
+    mark = snapshot.price if snapshot.price > 0 else s.price
+    gr = snapshot.game_remaining
+    held = portfolio.token
+    usdc = portfolio.usdc
+    avg = portfolio.avg_entry
+
+    def out(d: Decision) -> Decision:
+        if logger is not None:
+            mult = (mark / avg) if avg > 0 else 0.0
+            logger.debug(
+                "openpump[%s]: %s | mark=%.6f entry=%.6f x%.2f gr=%s held=%.4f cum=%.2f",
+                d.action, d.reason, mark, avg, mult, gr, held, portfolio.cumulative_buys)
+        return d
+
+    # ── Manage the open position ──
+    if held > cfg.min_token_sell:
+        if gr is not None and gr < cfg.exit_seconds:
+            return out(Decision.sell(held, f"DISSOLUTION exit gr={gr}"))
+        if avg <= 0 or mark <= 0:
+            return out(Decision.hold("riding; awaiting cost basis / mark"))
+        unrl = (mark - avg) / avg
+        mult = mark / avg
+        if mult >= cfg.pump_target_mult:
+            return out(Decision.sell(held, f"PUMP-TARGET x{mult:.2f}"))
+        if unrl <= -cfg.open_stop_pct:
+            return out(Decision.sell(held, f"OPEN-STOP unrl={unrl:.3f}"))
+        if portfolio.peak_price > avg:
+            peak_mult = portfolio.peak_price / avg
+            drop = safe_div(portfolio.peak_price - mark, portfolio.peak_price)
+            if peak_mult >= cfg.pump_trail_arm and drop >= cfg.open_trail_pct:
+                return out(Decision.sell(
+                    held, f"PUMP-TRAIL peak_x{peak_mult:.2f} drop={drop:.3f}"))
+        if gr is not None and gr <= cfg.open_exit_by_gr:
+            return out(Decision.sell(held, f"EARLY-EXIT gr={gr} unrl={unrl:.3f}"))
+        return out(Decision.hold(f"riding unrl={unrl:.3f} x{mult:.2f}"))
+
+    # ── Open entry: one big buy, early in the battle ──
+    if mark <= 0:
+        return out(Decision.hold("warming up - no price"))
+    if portfolio.cumulative_buys > 0:
+        return out(Decision.hold("open play already taken this battle"))
+    if gr is None or gr < cfg.open_entry_min_gr:
+        return out(Decision.hold(f"missed open window (gr={gr})"))
+    budget = max(0.0, cfg.buy_cap_usdc - portfolio.cumulative_buys)
+    size = min(cfg.open_buy_usdc, budget, usdc)
+    if size >= cfg.min_trade_usdc:
+        return out(Decision.buy(size, f"OPEN buy (gr={gr}, target x{cfg.pump_target_mult})"))
+    return out(Decision.hold("open: no budget/USDC"))
+
+
+def decide(snapshot: Snapshot, portfolio: Portfolio, cfg, logger=None) -> Decision:
+    """Dispatch to the configured strategy (cfg.strategy)."""
+    if getattr(cfg, "strategy", "reversal") == "open_pump":
+        return decide_open_pump(snapshot, portfolio, cfg, logger)
+    return decide_reversal(snapshot, portfolio, cfg, logger)
