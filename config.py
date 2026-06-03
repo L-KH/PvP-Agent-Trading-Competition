@@ -89,6 +89,7 @@ class Config:
     open_stop_pct: float = 0.12         # cut if price falls this far below entry (failed pump)
     open_exit_by_gr: int = 120          # backstop: exit the open play once gameRemaining <= this
                                         # (the early pump is over by then; endgame is a dead bleed)
+    open_hold_seconds: int = 12         # sell ~this many seconds after entry (fast exit "after N candles")
 
     # ── Sizing / risk ──
     trade_size_usdc: float = 100.0      # USDC per entry
@@ -99,7 +100,9 @@ class Config:
     # ── Timing ──
     exit_seconds: int = 15              # flatten when gameRemaining < this
     no_entry_seconds: int = 12          # no new entries when gameRemaining < this
-    poll_interval_s: float = 0.6        # decide() cadence (faster reaction)
+    poll_interval_s: float = 0.4        # decide() cadence while live (fast reaction)
+    open_poll_s: float = 0.15           # fast poll cadence as the session open approaches
+    open_poll_window: int = 6           # start fast-polling this many seconds before live opens
     loss_cooldown_s: int = 8            # pause new entries this long after a stop-loss
     heartbeat_s: int = 30               # liveness ping interval (<= 60)
     funding_wait_s: int = 6             # wait after register for the airdrop to land
@@ -253,6 +256,7 @@ def load_config(env_file: str = ".env", json_file: str = "config.json") -> Confi
     cfg.open_trail_pct = _f("BID_OPEN_TRAIL_PCT", cfg.open_trail_pct)
     cfg.open_stop_pct = _f("BID_OPEN_STOP_PCT", cfg.open_stop_pct)
     cfg.open_exit_by_gr = _i("BID_OPEN_EXIT_BY_GR", cfg.open_exit_by_gr)
+    cfg.open_hold_seconds = _i("BID_OPEN_HOLD_SECONDS", cfg.open_hold_seconds)
 
     cfg.trade_size_usdc = _f("BID_TRADE_SIZE_USDC", cfg.trade_size_usdc)
     cfg.buy_cap_usdc = _f("BID_BUY_CAP_USDC", cfg.buy_cap_usdc)
@@ -261,6 +265,8 @@ def load_config(env_file: str = ".env", json_file: str = "config.json") -> Confi
     cfg.exit_seconds = _i("BID_EXIT_SECONDS", cfg.exit_seconds)
     cfg.no_entry_seconds = _i("BID_NO_ENTRY_SECONDS", cfg.no_entry_seconds)
     cfg.poll_interval_s = _f("BID_POLL_INTERVAL_S", cfg.poll_interval_s)
+    cfg.open_poll_s = _f("BID_OPEN_POLL_S", cfg.open_poll_s)
+    cfg.open_poll_window = _i("BID_OPEN_POLL_WINDOW", cfg.open_poll_window)
     cfg.loss_cooldown_s = _i("BID_LOSS_COOLDOWN_S", cfg.loss_cooldown_s)
     cfg.heartbeat_s = _i("BID_HEARTBEAT_S", cfg.heartbeat_s)
     cfg.funding_wait_s = _i("BID_FUNDING_WAIT_S", cfg.funding_wait_s)

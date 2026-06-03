@@ -47,8 +47,8 @@ def _sig(price=100.0, vwap=100.0, rsi=50.0, drawdown=0.0, bounce=0.0,
                    bounce=bounce, short_momentum=short_momentum, n_trades=50)
 
 
-def _snap(sig, gr):
-    return Snapshot("0xtok", sig.price, sig, gr)
+def _snap(sig, gr, sip=0):
+    return Snapshot("0xtok", sig.price, sig, gr, seconds_in_position=sip)
 
 
 def _port(usdc, token, cum=0.0, avg_entry=0.0, peak=0.0):
@@ -201,6 +201,12 @@ def test_open_early_exit_backstop():
     # Past the early window with no target/stop/trail trigger -> bail before the bleed.
     d = decide_open_pump(_snap(_sig(price=1.05), 119), _port(0, 50, avg_entry=1.0, peak=1.05), _cfg())
     assert d.action == "sell" and "EARLY-EXIT" in d.reason
+
+
+def test_open_hold_time_exit():
+    # Held past open_hold_seconds (still early in the battle) -> fast time exit.
+    d = decide_open_pump(_snap(_sig(price=1.05), 160, sip=13), _port(0, 50, avg_entry=1.0, peak=1.05), _cfg())
+    assert d.action == "sell" and "HOLD-TIME" in d.reason
 
 
 # ── dispatcher ───────────────────────────────────────────────────────────────

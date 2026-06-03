@@ -63,6 +63,7 @@ class TradingAgent:
         self.cumulative_buys = 0.0     # USDC bought this battle (cap tracking)
         self.pos_cost_usdc = 0.0       # USDC cost basis of the OPEN position
         self.peak_price = 0.0          # highest mark since entry (trailing stop)
+        self.entry_gr = None           # gameRemaining when the current bag was opened
         self.cap_reached = False
         self.battle_start_usdc = None
         self.tick = 0
@@ -70,6 +71,7 @@ class TradingAgent:
         self._last_observe = 0
         self._last_status = 0
         self._cooldown_until = 0       # epoch; no new entries until then (post-loss)
+        self._approved_token = None    # token already pre-approved this battle
 
     # ── bootstrap ──────────────────────────────────────────────────────────────
     def bootstrap(self):
@@ -226,27 +228,29 @@ class TradingAgent:
             self.log.info("cumulative buys this battle: %.2f / %.0f USDC",
                           self.cumulative_buys, self.cfg.buy_cap_usdc)
         else:
-            # Bag sold -> position closed. Reset cost basis + peak HERE (worker,
-            # after the sell confirms) instead of in the loop, to avoid the
-            # balance-read race that once wiped the cost basis mid-hold.
+            # Bag sold -> position closed. Reset cost basis + peak + entry clock
+            # HERE (worker, after the sell confirms) instead of in the loop, to
+            # avoid the balance-read race that once wiped the cost basis mid-hold.
             self.pos_cost_usdc = 0.0
             self.peak_price = 0.0
+            self.entry_gr = None
 
     # ── per-battle bookkeeping ───────────────────────────────────────────────────
-    def _on_fresh_battle(self, token_address):
+    def _prepare_battle(self, token_address):
+        """Reset per-battle state and PRE-APPROVE the token. Runs the moment a new
+        token appears — usually during market-making, BEFORE live opens — so the
+        open buy can fire instantly when trading opens (no approve in the hot path)."""
         if self.last_token is not None:
             self._log_battle_pnl()
         self.cumulative_buys = 0.0
         self.pos_cost_usdc = 0.0
         self.peak_price = 0.0
+        self.entry_gr = None
         self.cap_reached = False
         self.tick = 0
-        self.log.info("── new battle: token %s ──", token_address)
-
-        try:
-            self.chain.approve_factory(token_address)
-        except Exception as exc:
-            self.log.warning("approve failed (sells may not settle): %s", exc)
+        self._approved_token = None
+        self.log.info("── new battle: token %s (pre-approving) ──", token_address)
+        self._dispatch_approve(token_address)
 
         try:
             usdc_wei, _ = self.chain.balances(None)
@@ -258,7 +262,22 @@ class TradingAgent:
         except Exception as exc:
             self.log.debug("battle start balance read failed: %s", exc)
             self.battle_start_usdc = None
-        self.last_token = token_address
+
+    def _dispatch_approve(self, token_address):
+        """Approve the battle token off the hot path (background thread)."""
+        if self.cfg.dry_run:
+            self.log.info("[DRY_RUN] would pre-approve %s", token_address)
+            self._approved_token = token_address
+            return
+
+        def _approve():
+            try:
+                self.chain.approve_factory(token_address)
+                self._approved_token = token_address
+            except Exception as exc:
+                self.log.warning("approve failed (sells may not settle): %s", exc)
+
+        threading.Thread(target=_approve, daemon=True, name="approve").start()
 
     def _log_battle_pnl(self):
         if self.battle_start_usdc is None:
@@ -281,9 +300,8 @@ class TradingAgent:
             return
         current_price = token_info.get("currentPrice")
         game_remaining = game.get("gameRemaining")
-
-        if token_address != self.last_token:
-            self._on_fresh_battle(token_address)
+        # NB: battle prep + token approval already happened in the main loop the
+        # moment this token appeared (during market-making), so we trade immediately.
 
         try:
             usdc_wei, token_wei = self.chain.balances(token_address)
@@ -310,10 +328,14 @@ class TradingAgent:
             avg_entry = self.pos_cost_usdc / token_f
             if mark > 0:
                 self.peak_price = max(self.peak_price, mark)
+            if self.entry_gr is None and game_remaining is not None:
+                self.entry_gr = game_remaining
         else:
             avg_entry = 0.0
 
-        snapshot = Snapshot(token_address, mark, signals, game_remaining, self.tick, False)
+        sip = (self.entry_gr - game_remaining
+               if self.entry_gr is not None and game_remaining is not None else 0)
+        snapshot = Snapshot(token_address, mark, signals, game_remaining, self.tick, False, sip)
         portfolio = Portfolio(usdc_f, token_f, self.cumulative_buys, avg_entry, self.peak_price)
         decision = decide(snapshot, portfolio, self.cfg, self.log)
         self.tick += 1
@@ -372,6 +394,17 @@ class TradingAgent:
                       game.get("status"), token, game.get("gameRemaining"),
                       game.get("mmRemaining"))
 
+    def _idle_sleep(self, game) -> float:
+        """How long to sleep while not trading. As the live open approaches we
+        fast-poll so we catch tradingOpen within ~open_poll_s and buy the open."""
+        if game.get("status") == "marketmaking":
+            now, mm_end = game.get("now"), game.get("mmEndAt")
+            if (now is not None and mm_end is not None
+                    and 0 <= (mm_end - now) <= self.cfg.open_poll_window):
+                return self.cfg.open_poll_s   # imminent open -> fast poll
+            return 1.0
+        return 2.0
+
     # ── main loop + supervisor ───────────────────────────────────────────────────
     def run(self):
         self.bootstrap()
@@ -388,9 +421,19 @@ class TradingAgent:
                 self._stop.wait(3)
                 continue
 
+            # Prepare each new battle the instant its token appears (usually during
+            # market-making) -> pre-approve so the open buy fires with no delay.
+            token = (game.get("token") or {}).get("address")
+            if token and token != self.last_token:
+                try:
+                    self._prepare_battle(token)
+                except Exception as exc:
+                    self.log.warning("battle prep error: %s", exc)
+                self.last_token = token
+
             if not game.get("tradingOpen"):
                 self._observe(game)
-                self._stop.wait(max(1.0, self.cfg.poll_interval_s))
+                self._stop.wait(self._idle_sleep(game))
                 continue
 
             try:

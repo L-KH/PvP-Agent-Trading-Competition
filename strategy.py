@@ -59,6 +59,7 @@ class Snapshot:
     game_remaining: Optional[int]
     tick: int = 0
     fresh_battle: bool = False
+    seconds_in_position: int = 0   # how long we've held the current bag
 
 
 @dataclass
@@ -329,13 +330,16 @@ def decide_open_pump(snapshot: Snapshot, portfolio: Portfolio, cfg, logger=None)
             if peak_mult >= cfg.pump_trail_arm and drop >= cfg.open_trail_pct:
                 return out(Decision.sell(
                     held, f"PUMP-TRAIL peak_x{peak_mult:.2f} drop={drop:.3f}"))
+        if snapshot.seconds_in_position >= cfg.open_hold_seconds:
+            return out(Decision.sell(
+                held, f"HOLD-TIME {snapshot.seconds_in_position}s unrl={unrl:.3f}"))
         if gr is not None and gr <= cfg.open_exit_by_gr:
             return out(Decision.sell(held, f"EARLY-EXIT gr={gr} unrl={unrl:.3f}"))
         return out(Decision.hold(f"riding unrl={unrl:.3f} x{mult:.2f}"))
 
-    # ── Open entry: one big buy, early in the battle ──
-    if mark <= 0:
-        return out(Decision.hold("warming up - no price"))
+    # ── Open entry: one big buy, the instant the session opens ──
+    # No price guard here on purpose — we buy a fixed USDC size at the open and
+    # don't need a quote; waiting for the first trade to print would cost the bottom.
     if portfolio.cumulative_buys > 0:
         return out(Decision.hold("open play already taken this battle"))
     if gr is None or gr < cfg.open_entry_min_gr:
