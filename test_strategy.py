@@ -11,6 +11,7 @@ No network or chain access required.
 from __future__ import annotations
 
 from config import Config
+from memory import BattleMemory
 from strategy import (
     Portfolio, Signals, Snapshot, build_signals, compute_flow_imbalance,
     compute_momentum, compute_rsi, compute_structure, compute_volatility,
@@ -263,6 +264,23 @@ def test_dispatch_selects_strategy():
 
 def test_to_wei18_roundtrip():
     assert to_wei18(1) == 10 ** 18 and to_wei18(0.000001) == 10 ** 12
+
+
+# ── adaptive learning memory ─────────────────────────────────────────────────
+def test_memory_stats():
+    m = BattleMemory("__no_such_file__.json", window=10)
+    m.records = [{"ret": 0.10, "peak_gain": 0.5}, {"ret": -0.20, "peak_gain": 0.3},
+                 {"ret": 0.05, "peak_gain": 0.7}]
+    assert m.count() == 3
+    assert abs(m.win_rate() - 2 / 3) < 1e-9
+    assert abs(m.median_peak_gain(0.0) - 0.5) < 1e-9
+    assert abs(m.avg_return() - (0.10 - 0.20 + 0.05) / 3) < 1e-9
+
+
+def test_memory_empty_uses_default():
+    m = BattleMemory("__no_such_file__.json", window=10)
+    m.records = []
+    assert m.median_peak_gain(0.42) == 0.42 and m.win_rate() is None
 
 
 # ── standalone runner ──────────────────────────────────────────────────────────

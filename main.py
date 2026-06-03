@@ -25,9 +25,10 @@ import requests
 from bid_client import BIDAPIError, BIDClient
 from chain import ChainTrader
 from config import DEFAULT_RPC_URL, ConfigError, load_config
+from memory import BattleMemory
 from strategy import Portfolio, Snapshot, build_signals, decide
 from utils import (
-    from_wei18, jwt_expiring, load_or_create_account, now_ts, safe_div,
+    clamp, from_wei18, jwt_expiring, load_or_create_account, now_ts, safe_div,
     setup_logging, short_addr, to_wei18, write_state,
 )
 
@@ -72,6 +73,10 @@ class TradingAgent:
         self._last_status = 0
         self._cooldown_until = 0       # epoch; no new entries until then (post-loss)
         self._approved_token = None    # token already pre-approved this battle
+        self.memory = BattleMemory(self.cfg.history_file, self.cfg.adaptive_window)
+        self.battle_open_price = None  # first live price of the current battle
+        self.battle_peak_price = 0.0   # highest price seen this battle
+        self._base_target = self.cfg.pump_target_mult  # base take-profit before learning
 
     # ── bootstrap ──────────────────────────────────────────────────────────────
     def bootstrap(self):
@@ -249,6 +254,9 @@ class TradingAgent:
         self.cap_reached = False
         self.tick = 0
         self._approved_token = None
+        self.battle_open_price = None
+        self.battle_peak_price = 0.0
+        self._apply_learning()
         self.log.info("── new battle: token %s (pre-approving) ──", token_address)
         self._dispatch_approve(token_address)
 
@@ -279,6 +287,23 @@ class TradingAgent:
 
         threading.Thread(target=_approve, daemon=True, name="approve").start()
 
+    def _apply_learning(self):
+        """Set this battle's take-profit target from the recent pump regime —
+        aim to capture a fraction of the rolling-median pump (memory.py)."""
+        if not self.cfg.adaptive:
+            return
+        median = self.memory.median_peak_gain(self._base_target - 1.0)
+        target = clamp(1.0 + median * self.cfg.adaptive_capture_frac,
+                       self.cfg.adaptive_min_target, self.cfg.adaptive_max_target)
+        self.cfg.pump_target_mult = target
+        wr, ar = self.memory.win_rate(), self.memory.avg_return()
+        self.log.info(
+            "learn: %d battles | win=%s avg=%s | median pump +%.0f%% -> target x%.2f",
+            self.memory.count(),
+            ("%.0f%%" % (wr * 100)) if wr is not None else "n/a",
+            ("%+.1f%%" % (ar * 100)) if ar is not None else "n/a",
+            median * 100, target)
+
     def _log_battle_pnl(self):
         if self.battle_start_usdc is None:
             return
@@ -289,8 +314,15 @@ class TradingAgent:
         end_usdc = from_wei18(usdc_wei)
         pnl = end_usdc - self.battle_start_usdc
         self.total_pnl += pnl
-        self.log.info("battle PnL: %+.2f USDC (%.2f -> %.2f) | total %+.2f",
-                      pnl, self.battle_start_usdc, end_usdc, self.total_pnl)
+        ret = safe_div(pnl, self.battle_start_usdc)
+        peak_gain = (safe_div(self.battle_peak_price - self.battle_open_price, self.battle_open_price)
+                     if self.battle_open_price else 0.0)
+        try:
+            self.memory.record(self.last_token or "?", ret, peak_gain)
+        except Exception:
+            pass
+        self.log.info("battle PnL: %+.2f USDC (%.2f -> %.2f) | total %+.2f | peak +%.0f%%",
+                      pnl, self.battle_start_usdc, end_usdc, self.total_pnl, peak_gain * 100)
 
     # ── one tick of the trading loop ─────────────────────────────────────────────
     def _tick(self, game):
@@ -319,6 +351,11 @@ class TradingAgent:
         mark = signals.price
         usdc_f = from_wei18(usdc_wei)
         token_f = from_wei18(token_wei)
+
+        if mark > 0:  # learning data: where the battle opened and how high it ran
+            if self.battle_open_price is None:
+                self.battle_open_price = mark
+            self.battle_peak_price = max(self.battle_peak_price, mark)
 
         # Position cost basis + trailing peak. pos_cost_usdc / peak_price are
         # mutated ONLY by trade workers (buy += / sell reset) and on a fresh

@@ -19,6 +19,9 @@ Thumbs.db
 # Stray generated images dropped in the folder (not curated repo assets)
 Gemini_Generated_Image_*.png
 
+# Runtime learning state (per-machine, not a repo asset)
+.battle_history.json
+
 # Logs
 logs/
 

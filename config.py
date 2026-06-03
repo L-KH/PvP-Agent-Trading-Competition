@@ -91,8 +91,16 @@ class Config:
     open_exit_by_gr: int = 120          # backstop: exit the open play once gameRemaining <= this
                                         # (the early pump is over by then; endgame is a dead bleed)
     open_hold_seconds: int = 12         # sell ~this many seconds after entry (fast exit "after N candles")
-    open_reenter: bool = False          # False = ONE open play per battle, then nothing (best so far)
-                                        # True  = also scalp later dips (multiple trades/battle)
+    open_reenter: bool = True           # True = also scalp later dips (multiple trades/battle)
+                                        # False = ONE open play per battle, then nothing
+
+    # ── Adaptive learning from past battles (memory.py) ──
+    adaptive: bool = True               # adapt the take-profit target to the recent pump regime
+    history_file: str = ".battle_history.json"
+    adaptive_window: int = 30           # battles of history to learn from
+    adaptive_capture_frac: float = 0.6  # aim to capture this fraction of the median pump
+    adaptive_min_target: float = 1.15   # never target less than +15%
+    adaptive_max_target: float = 4.0    # never target more than 4x
 
     # ── Sizing / risk ──
     trade_size_usdc: float = 100.0      # USDC per entry
@@ -262,6 +270,12 @@ def load_config(env_file: str = ".env", json_file: str = "config.json") -> Confi
     cfg.open_exit_by_gr = _i("BID_OPEN_EXIT_BY_GR", cfg.open_exit_by_gr)
     cfg.open_hold_seconds = _i("BID_OPEN_HOLD_SECONDS", cfg.open_hold_seconds)
     cfg.open_reenter = _b("BID_OPEN_REENTER", cfg.open_reenter)
+    cfg.adaptive = _b("BID_ADAPTIVE", cfg.adaptive)
+    cfg.history_file = _s("BID_HISTORY_FILE", cfg.history_file)
+    cfg.adaptive_window = _i("BID_ADAPTIVE_WINDOW", cfg.adaptive_window)
+    cfg.adaptive_capture_frac = _f("BID_ADAPTIVE_CAPTURE_FRAC", cfg.adaptive_capture_frac)
+    cfg.adaptive_min_target = _f("BID_ADAPTIVE_MIN_TARGET", cfg.adaptive_min_target)
+    cfg.adaptive_max_target = _f("BID_ADAPTIVE_MAX_TARGET", cfg.adaptive_max_target)
 
     cfg.trade_size_usdc = _f("BID_TRADE_SIZE_USDC", cfg.trade_size_usdc)
     cfg.buy_cap_usdc = _f("BID_BUY_CAP_USDC", cfg.buy_cap_usdc)
