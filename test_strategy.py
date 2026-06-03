@@ -209,6 +209,30 @@ def test_open_hold_time_exit():
     assert d.action == "sell" and "HOLD-TIME" in d.reason
 
 
+# ── open_patient variant (no hard stop; trailing-only; smaller size) ─────────
+def test_patient_holds_through_dip_no_stop():
+    cfg = _cfg(strategy="open_patient")  # -30% would stop open_pump out; patient holds
+    d = decide_open_pump(_snap(_sig(price=0.70), 120, sip=30), _port(0, 50, avg_entry=1.0, peak=1.0), cfg)
+    assert d.action == "hold" and "riding" in d.reason
+
+
+def test_patient_trailing_still_exits():
+    cfg = _cfg(strategy="open_patient")
+    d = decide_open_pump(_snap(_sig(price=1.13), 120), _port(0, 50, avg_entry=1.0, peak=1.30), cfg)
+    assert d.action == "sell" and "PUMP-TRAIL" in d.reason
+
+
+def test_patient_smaller_size():
+    cfg = _cfg(strategy="open_patient")
+    d = decide_open_pump(_snap(_sig(price=1.0), 178), _port(usdc=1000, token=0, cum=0), cfg)
+    assert d.action == "buy" and abs(d.amount_usdc - cfg.open_patient_buy_usdc) < 1e-9
+
+
+def test_dispatch_open_patient():
+    d = decide(_snap(_sig(price=1.0), 178), _port(100, 0, cum=0), _cfg(strategy="open_patient"))
+    assert "OPEN-PATIENT" in d.reason
+
+
 # ── dispatcher ───────────────────────────────────────────────────────────────
 def test_default_strategy_is_open_pump():
     assert Config().strategy == "open_pump"

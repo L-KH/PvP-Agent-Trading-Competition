@@ -80,8 +80,9 @@ class Config:
     # ── Strategy selector + "open_pump" (buy the open, ride the early pump) ──
     # These launch tokens reliably pump ~3-5x in the first ~20s, then bleed down.
     # "open_pump" buys big at the session open and rides that pump.
-    strategy: str = "open_pump"         # "open_pump" | "reversal"
+    strategy: str = "open_pump"         # "open_pump" | "open_patient" | "reversal"
     open_buy_usdc: float = 1000.0       # open-buy size (clamped to budget/Safe => ~all-in)
+    open_patient_buy_usdc: float = 50.0 # smaller open-buy for the "open_patient" variant
     open_entry_min_gr: int = 150        # only open-buy while gameRemaining >= this (early in live)
     pump_target_mult: float = 3.0       # hard take-profit at entry x this
     pump_trail_arm: float = 1.2         # arm the pump trailing-stop once price >= entry x this
@@ -250,6 +251,7 @@ def load_config(env_file: str = ".env", json_file: str = "config.json") -> Confi
 
     cfg.strategy = _s("BID_STRATEGY", cfg.strategy)
     cfg.open_buy_usdc = _f("BID_OPEN_BUY_USDC", cfg.open_buy_usdc)
+    cfg.open_patient_buy_usdc = _f("BID_OPEN_PATIENT_BUY_USDC", cfg.open_patient_buy_usdc)
     cfg.open_entry_min_gr = _i("BID_OPEN_ENTRY_MIN_GR", cfg.open_entry_min_gr)
     cfg.pump_target_mult = _f("BID_PUMP_TARGET_MULT", cfg.pump_target_mult)
     cfg.pump_trail_arm = _f("BID_PUMP_TRAIL_ARM", cfg.pump_trail_arm)

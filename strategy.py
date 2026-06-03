@@ -303,6 +303,9 @@ def decide_open_pump(snapshot: Snapshot, portfolio: Portfolio, cfg, logger=None)
     held = portfolio.token
     usdc = portfolio.usdc
     avg = portfolio.avg_entry
+    # "open_patient": hold through dips (no hard stop / time cuts) and let the
+    # trailing stop capture the pump's peak; dissolution is the only floor.
+    patient = getattr(cfg, "strategy", "") == "open_patient"
 
     def out(d: Decision) -> Decision:
         if logger is not None:
@@ -322,7 +325,7 @@ def decide_open_pump(snapshot: Snapshot, portfolio: Portfolio, cfg, logger=None)
         mult = mark / avg
         if mult >= cfg.pump_target_mult:
             return out(Decision.sell(held, f"PUMP-TARGET x{mult:.2f}"))
-        if unrl <= -cfg.open_stop_pct:
+        if not patient and unrl <= -cfg.open_stop_pct:
             return out(Decision.sell(held, f"OPEN-STOP unrl={unrl:.3f}"))
         if portfolio.peak_price > avg:
             peak_mult = portfolio.peak_price / avg
@@ -330,10 +333,10 @@ def decide_open_pump(snapshot: Snapshot, portfolio: Portfolio, cfg, logger=None)
             if peak_mult >= cfg.pump_trail_arm and drop >= cfg.open_trail_pct:
                 return out(Decision.sell(
                     held, f"PUMP-TRAIL peak_x{peak_mult:.2f} drop={drop:.3f}"))
-        if snapshot.seconds_in_position >= cfg.open_hold_seconds:
+        if not patient and snapshot.seconds_in_position >= cfg.open_hold_seconds:
             return out(Decision.sell(
                 held, f"HOLD-TIME {snapshot.seconds_in_position}s unrl={unrl:.3f}"))
-        if gr is not None and gr <= cfg.open_exit_by_gr:
+        if not patient and gr is not None and gr <= cfg.open_exit_by_gr:
             return out(Decision.sell(held, f"EARLY-EXIT gr={gr} unrl={unrl:.3f}"))
         return out(Decision.hold(f"riding unrl={unrl:.3f} x{mult:.2f}"))
 
@@ -345,14 +348,16 @@ def decide_open_pump(snapshot: Snapshot, portfolio: Portfolio, cfg, logger=None)
     if gr is None or gr < cfg.open_entry_min_gr:
         return out(Decision.hold(f"missed open window (gr={gr})"))
     budget = max(0.0, cfg.buy_cap_usdc - portfolio.cumulative_buys)
-    size = min(cfg.open_buy_usdc, budget, usdc)
+    base = cfg.open_patient_buy_usdc if patient else cfg.open_buy_usdc
+    size = min(base, budget, usdc)
     if size >= cfg.min_trade_usdc:
-        return out(Decision.buy(size, f"OPEN buy (gr={gr}, target x{cfg.pump_target_mult})"))
+        tag = "OPEN-PATIENT" if patient else "OPEN"
+        return out(Decision.buy(size, f"{tag} buy (gr={gr}, target x{cfg.pump_target_mult})"))
     return out(Decision.hold("open: no budget/USDC"))
 
 
 def decide(snapshot: Snapshot, portfolio: Portfolio, cfg, logger=None) -> Decision:
     """Dispatch to the configured strategy (cfg.strategy)."""
-    if getattr(cfg, "strategy", "reversal") == "open_pump":
+    if getattr(cfg, "strategy", "reversal") in ("open_pump", "open_patient"):
         return decide_open_pump(snapshot, portfolio, cfg, logger)
     return decide_reversal(snapshot, portfolio, cfg, logger)

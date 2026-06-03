@@ -409,9 +409,12 @@ class TradingAgent:
     def run(self):
         self.bootstrap()
         self.start_heartbeat()
-        self.log.info("agent live: %s | DRY_RUN=%s | buy_cap=%.0f USDC | trade_size=%.0f",
-                      short_addr(self.state["address"]), self.cfg.dry_run,
-                      self.cfg.buy_cap_usdc, self.cfg.trade_size_usdc)
+        self.log.info(
+            "agent live: %s | strategy=%s | DRY_RUN=%s | entry>=gr%d target=x%.1f "
+            "trail=%.0f%% poll=%.2fs",
+            short_addr(self.state["address"]), self.cfg.strategy, self.cfg.dry_run,
+            self.cfg.open_entry_min_gr, self.cfg.pump_target_mult,
+            self.cfg.open_trail_pct * 100, self.cfg.poll_interval_s)
 
         while not self._stop.is_set():
             try:
