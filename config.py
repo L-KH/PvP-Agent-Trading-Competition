@@ -91,7 +91,8 @@ class Config:
     open_exit_by_gr: int = 120          # backstop: exit the open play once gameRemaining <= this
                                         # (the early pump is over by then; endgame is a dead bleed)
     open_hold_seconds: int = 12         # sell ~this many seconds after entry (fast exit "after N candles")
-    open_reenter: bool = True           # after the open play, scalp later dips too (multiple trades/battle)
+    open_reenter: bool = False          # False = ONE open play per battle, then nothing (best so far)
+                                        # True  = also scalp later dips (multiple trades/battle)
 
     # ── Sizing / risk ──
     trade_size_usdc: float = 100.0      # USDC per entry
