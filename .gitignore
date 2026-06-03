@@ -16,6 +16,9 @@ instructions.txt
 .DS_Store
 Thumbs.db
 
+# Stray generated images dropped in the folder (not curated repo assets)
+Gemini_Generated_Image_*.png
+
 # Logs
 logs/
 
