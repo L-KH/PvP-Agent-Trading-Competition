@@ -91,6 +91,7 @@ class Config:
     open_exit_by_gr: int = 120          # backstop: exit the open play once gameRemaining <= this
                                         # (the early pump is over by then; endgame is a dead bleed)
     open_hold_seconds: int = 12         # sell ~this many seconds after entry (fast exit "after N candles")
+    open_reenter: bool = True           # after the open play, scalp later dips too (multiple trades/battle)
 
     # ── Sizing / risk ──
     trade_size_usdc: float = 100.0      # USDC per entry
@@ -259,6 +260,7 @@ def load_config(env_file: str = ".env", json_file: str = "config.json") -> Confi
     cfg.open_stop_pct = _f("BID_OPEN_STOP_PCT", cfg.open_stop_pct)
     cfg.open_exit_by_gr = _i("BID_OPEN_EXIT_BY_GR", cfg.open_exit_by_gr)
     cfg.open_hold_seconds = _i("BID_OPEN_HOLD_SECONDS", cfg.open_hold_seconds)
+    cfg.open_reenter = _b("BID_OPEN_REENTER", cfg.open_reenter)
 
     cfg.trade_size_usdc = _f("BID_TRADE_SIZE_USDC", cfg.trade_size_usdc)
     cfg.buy_cap_usdc = _f("BID_BUY_CAP_USDC", cfg.buy_cap_usdc)

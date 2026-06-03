@@ -161,9 +161,24 @@ def test_open_buy_at_session_start():
     assert d.action == "buy" and "OPEN" in d.reason and abs(d.amount_usdc - 100) < 1e-9
 
 
-def test_open_no_rebuy_after_play():
-    d = decide_open_pump(_snap(_sig(price=1.0), 170), _port(usdc=100, token=0, cum=100), _cfg())
+def test_open_no_rebuy_when_reenter_off():
+    cfg = _cfg(open_reenter=False)
+    d = decide_open_pump(_snap(_sig(price=1.0), 170), _port(usdc=100, token=0, cum=100), cfg)
     assert d.action == "hold" and "already" in d.reason
+
+
+def test_open_reenter_on_dip():
+    cfg = _cfg(open_reenter=True)
+    sig = _sig(price=1.0, rsi=30, drawdown=0.20, short_momentum=0.01, flow=0.30)
+    d = decide_open_pump(_snap(sig, 120), _port(usdc=1000, token=0, cum=100), cfg)
+    assert d.action == "buy" and "REENTER" in d.reason
+
+
+def test_open_reenter_waits_for_dip():
+    cfg = _cfg(open_reenter=True)
+    sig = _sig(price=1.0, rsi=70, drawdown=0.20, short_momentum=0.01, flow=0.30)  # not oversold
+    d = decide_open_pump(_snap(sig, 120), _port(usdc=1000, token=0, cum=100), cfg)
+    assert d.action == "hold" and "waiting for dip" in d.reason
 
 
 def test_open_missed_window():

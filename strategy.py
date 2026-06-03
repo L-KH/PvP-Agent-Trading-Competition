@@ -340,20 +340,34 @@ def decide_open_pump(snapshot: Snapshot, portfolio: Portfolio, cfg, logger=None)
             return out(Decision.sell(held, f"EARLY-EXIT gr={gr} unrl={unrl:.3f}"))
         return out(Decision.hold(f"riding unrl={unrl:.3f} x{mult:.2f}"))
 
-    # ── Open entry: one big buy, the instant the session opens ──
-    # No price guard here on purpose — we buy a fixed USDC size at the open and
-    # don't need a quote; waiting for the first trade to print would cost the bottom.
-    if portfolio.cumulative_buys > 0:
-        return out(Decision.hold("open play already taken this battle"))
-    if gr is None or gr < cfg.open_entry_min_gr:
-        return out(Decision.hold(f"missed open window (gr={gr})"))
+    # ── Entry (flat) ──
+    if portfolio.cumulative_buys <= 0:
+        # THE OPEN PLAY: buy a fixed size the instant the session opens. No price
+        # guard — waiting for the first print would cost the bottom.
+        if gr is None or gr < cfg.open_entry_min_gr:
+            return out(Decision.hold(f"missed open window (gr={gr})"))
+        tag = "OPEN-PATIENT" if patient else "OPEN"
+    else:
+        # Open play already done. Re-enter to scalp later dips (multiple trades
+        # per battle) — but only on a genuine dip-reversal, not every tick.
+        if not cfg.open_reenter:
+            return out(Decision.hold("open play already taken this battle"))
+        if gr is not None and gr < cfg.no_entry_seconds:
+            return out(Decision.hold("re-entry blackout near round end"))
+        dip = (s.drawdown >= cfg.min_drawdown and s.short_momentum >= cfg.min_entry_momentum
+               and s.rsi <= cfg.rsi_buy_max and s.flow_imbalance >= cfg.flow_min)
+        if not dip:
+            return out(Decision.hold(
+                f"re-entry: waiting for dip (rsi={s.rsi:.0f} dd={s.drawdown:.3f} "
+                f"turn={s.short_momentum:.3f} flow={s.flow_imbalance:.2f})"))
+        tag = "REENTER-PATIENT" if patient else "REENTER"
+
     budget = max(0.0, cfg.buy_cap_usdc - portfolio.cumulative_buys)
     base = cfg.open_patient_buy_usdc if patient else cfg.open_buy_usdc
     size = min(base, budget, usdc)
     if size >= cfg.min_trade_usdc:
-        tag = "OPEN-PATIENT" if patient else "OPEN"
         return out(Decision.buy(size, f"{tag} buy (gr={gr}, target x{cfg.pump_target_mult})"))
-    return out(Decision.hold("open: no budget/USDC"))
+    return out(Decision.hold("entry: no budget/USDC"))
 
 
 def decide(snapshot: Snapshot, portfolio: Portfolio, cfg, logger=None) -> Decision:
