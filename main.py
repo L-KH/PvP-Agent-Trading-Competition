@@ -101,7 +101,16 @@ class TradingAgent:
         name = cfg.agent_name or ("agent-" + self.account.address[2:10])
 
         self.log.info("registering '%s' (EOA %s)…", name, self.account.address)
-        reg = self.client.register(self.account, user_jwt, name, cfg.archetype)
+        try:
+            reg = self.client.register(self.account, user_jwt, name, cfg.archetype)
+        except BIDAPIError as exc:
+            if exc.status == 409:  # account already has an agent — registering more is futile
+                raise ConfigError(
+                    "this account already has a registered agent (one agent per account). "
+                    "To run that SAME agent here, copy its '.agent.json' (from the machine "
+                    "where you first registered) into this folder, then restart. "
+                    "Do NOT keep registering — it will keep failing with 409.")
+            raise
 
         trading_safe = _pick(reg, "trading_safe", "tradingSafe")
         if not trading_safe:
